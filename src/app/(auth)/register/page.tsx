@@ -45,8 +45,11 @@ export default function RegisterPage() {
         return;
       }
 
-      router.push('/dashboard');
-      router.refresh();
+      const query = new URLSearchParams({
+        verify: '1',
+        email: form.email,
+      });
+      router.push(`/login?${query.toString()}`);
     } catch {
       setError('Network error. Please try again.');
     } finally {

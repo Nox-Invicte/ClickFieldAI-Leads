@@ -26,11 +26,38 @@ export async function POST(req: NextRequest) {
       password,
     });
 
-    if (signInError || !signInData.user) {
+    if (signInError) {
+      const message = signInError.message.toLowerCase();
+      if (message.includes('confirm') || message.includes('verified')) {
+        return NextResponse.json(
+          {
+            error: 'Verify email before signing in.',
+            code: 'EMAIL_NOT_VERIFIED',
+          },
+          { status: 403 }
+        );
+      }
+
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    }
+
+    if (!signInData.user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
     const authUser = signInData.user;
+    const isEmailVerified = Boolean(authUser.email_confirmed_at ?? authUser.confirmed_at);
+
+    if (!isEmailVerified) {
+      return NextResponse.json(
+        {
+          error: 'Verify email before signing in.',
+          code: 'EMAIL_NOT_VERIFIED',
+        },
+        { status: 403 }
+      );
+    }
+
     const role = (authUser.user_metadata?.role as string | undefined) ?? 'MANAGER';
     const name =
       (authUser.user_metadata?.name as string | undefined) ??

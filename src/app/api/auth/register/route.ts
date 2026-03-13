@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAuthClient, getSupabaseServerClient } from '@/lib/supabase-server';
-import { signToken } from '@/lib/auth';
 import { z } from 'zod';
 
 const registerSchema = z.object({
@@ -62,14 +61,10 @@ export async function POST(req: NextRequest) {
       console.error('User profile sync error:', upsertError);
     }
 
-    const token = await signToken({
-      userId: authUser.id,
-      email: authUser.email ?? email,
-      role,
-    });
-
-    const res = NextResponse.json(
+    return NextResponse.json(
       {
+        message: 'Account created. Please verify your email before signing in.',
+        requiresEmailVerification: true,
         user: {
           id: authUser.id,
           name,
@@ -79,14 +74,6 @@ export async function POST(req: NextRequest) {
       },
       { status: 201 }
     );
-    res.cookies.set('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
-      path: '/',
-    });
-    return res;
   } catch (err) {
     console.error('Register error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
