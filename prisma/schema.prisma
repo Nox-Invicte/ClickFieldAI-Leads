@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      Role     @default(MANAGER)
+  createdAt DateTime @default(now())
+  leads     Lead[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+}
+
+model Lead {
+  id             String        @id @default(cuid())
+  name           String
+  email          String
+  phone          String?
+  company        String?
+  source         LeadSource
+  status         LeadStatus    @default(NEW)
+  score          LeadScore?
+  estimatedValue Float?
+  convertedAt    DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  assignedToId   String?
+  assignedTo     User?         @relation(fields: [assignedToId], references: [id])
+  interactions   Interaction[]
+  aiSummary      String?
+  aiFollowUp     String?
+}
+
+enum LeadSource {
+  WEBSITE
+  EMAIL
+  REFERRAL
+  LINKEDIN
+  COLD_OUTREACH
+  EVENT
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+enum LeadScore {
+  HOT
+  WARM
+  COLD
+}
+
+model Interaction {
+  id        String          @id @default(cuid())
+  leadId    String
+  lead      Lead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      InteractionType
+  content   String
+  createdAt DateTime        @default(now())
+}
+
+enum InteractionType {
+  EMAIL
+  CHAT
+  NOTE
+  CALL
+}
