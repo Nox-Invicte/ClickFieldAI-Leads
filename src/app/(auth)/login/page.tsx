@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
@@ -10,7 +10,20 @@ export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [form, setForm] = useState({ email: '', password: '' });
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get('verify') === '1') {
+      const email = query.get('email');
+      if (email) {
+        setNotice(`Account created. Verify the email sent to ${email} before signing in.`);
+      } else {
+        setNotice('Account created. Please verify your email before signing in.');
+      }
+    }
+  }, []);
 
   const handleChange = (field: string, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -31,6 +44,11 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const data = await res.json();
+        if (res.status === 403 || data.code === 'EMAIL_NOT_VERIFIED') {
+          setError('');
+          setNotice(data.error ?? 'Verify email before signing in.');
+          return;
+        }
         setError(data.error ?? 'Login failed');
         return;
       }
@@ -60,6 +78,10 @@ export default function LoginPage() {
 
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {notice && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{notice}</p>
+            )}
+
             <Input
               label="Email"
               type="email"
