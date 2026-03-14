@@ -33,7 +33,7 @@ Every time someone on the team interacts with a lead, it gets logged against tha
 This builds a full history of every touchpoint with the prospect.
 
 ### 4. AI Lead Scoring
-With one click, the manager can ask the AI to **score the lead**. The AI (GPT-4o-mini) reads the lead's source, current pipeline status, estimated deal value, and the entire interaction history, then returns:
+With one click, the manager can ask the AI to **score the lead**. The AI (`llama-3.3-70b-versatile` via Groq's OpenAI-compatible API) reads the lead's source, current pipeline status, estimated deal value, and the entire interaction history, then returns:
 - A **score**: 🔥 Hot, 🌤 Warm, or ❄️ Cold
 - A **reasoning**: a 1–2 sentence explanation of why
 - A **follow-up suggestion**: a specific, actionable next step
@@ -81,7 +81,7 @@ Browser
         Validates JWT, runs business logic, queries the database
               │
         ├─► Supabase JS ──► Supabase Postgres
-              └─► OpenAI API (GPT-4o-mini) — only on /score and /summary routes
+              └─► Groq OpenAI-compatible API (`llama-3.3-70b-versatile`) — only on /score and /summary routes
 ```
 
 ---
@@ -153,19 +153,19 @@ User ─┐
 
 Supabase Postgres is the primary database. API routes query tables through `@supabase/supabase-js` using a server-side Supabase client.
 
-### AI Integration — OpenAI GPT-4o-mini
+### AI Integration — OpenAI SDK + Groq (Llama 3.3)
 
 AI is invoked only on two explicit user actions (not automatically), keeping costs controlled:
 
 **Lead Scoring** (`POST /api/leads/:id/score`):
 - Fetches the full lead + all interactions from the database
 - Assembles a structured prompt with all context
-- Calls GPT-4o-mini with `response_format: { type: 'json_object' }` to guarantee parseable output
+- Calls `llama-3.3-70b-versatile` with `response_format: { type: 'json_object' }` to guarantee parseable output
 - Writes `score` and `aiFollowUp` back to the lead row
 
 **Interaction Summary** (`POST /api/leads/:id/summary`):
 - Formats all interactions as a chronological transcript
-- Asks GPT-4o-mini to summarise in 2–3 sentences
+- Asks `llama-3.3-70b-versatile` to summarise in 2–3 sentences
 - Writes the result to `aiSummary` on the lead row
 
 Results are persisted in the database so the AI doesn't need to be called again unless the manager explicitly requests a refresh.
@@ -176,7 +176,58 @@ The project deploys to **Vercel** with zero configuration:
 - Vercel auto-detects Next.js and sets up the build pipeline
 - API routes deploy as **serverless functions** (Node.js runtime)
 - Middleware deploys to **Vercel Edge Network** (V8 runtime, globally distributed)
-- Environment variables (`DATABASE_URL`, `JWT_SECRET`, `OPENAI_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are set in the Vercel dashboard
+- Environment variables (`DATABASE_URL`, `JWT_SECRET`, `GROQ_API_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) are set in the Vercel dashboard
+
+---
+
+## Issues Faced During Development (And How They Were Handled)
+
+1. **Runtime mismatch between Edge middleware and Node API routes**
+  **Product risk:** Login checks could fail in production if token verification relied on Node-only APIs at the edge.
+  **What we changed:** Split JWT utilities into edge-safe and server-safe modules (`auth-edge.ts` and `auth.ts`).
+  **Outcome:** Auth checks now run consistently in both environments with lower deployment risk.
+
+2. **Identity sync across Supabase Auth and application user records**
+  **Product risk:** Broken ownership/assignment data if an auth user existed without a matching app-level `User` row.
+  **What we changed:** Added explicit upsert synchronization during register and login.
+  **Outcome:** Auth identity and application relations stay aligned, reducing data integrity issues.
+
+3. **Inconsistent AI output shape for scoring workflows**
+  **Product risk:** Sales users could receive malformed responses, causing UI/API failures or unclear follow-up guidance.
+  **What we changed:** Enforced JSON-formatted responses and added defensive parsing in the scoring pipeline.
+  **Outcome:** AI outputs are more predictable, making the scoring feature production-usable.
+
+4. **Analytics approach that is simple now but expensive later**
+  **Product risk:** As lead volume increases, response time and API compute costs can rise.
+  **What we changed:** Kept a fast-to-ship implementation while documenting the migration path to SQL-side aggregation.
+  **Outcome:** The dashboard works reliably today and has a clear scalability plan.
+
+5. **Documentation drift while iterating quickly on AI provider/model choices**
+  **Product risk:** New contributors can misconfigure environment variables or expect incorrect model behavior.
+  **What we changed:** Updated README stack and environment docs to match the current Groq-backed implementation.
+  **Outcome:** Faster onboarding and fewer setup errors.
+
+---
+
+## Future Improvements
+
+1. **Move analytics aggregation into SQL views/materialized views**
+  Business impact: Lower response times on high lead volume and reduced serverless compute cost.
+
+2. **Run AI tasks asynchronously (queue + worker)**
+  Business impact: Better perceived performance because users are not blocked by model latency.
+
+3. **Harden AI reliability (retries, timeouts, fallbacks, schema validation)**
+  Business impact: Fewer failed AI actions and more consistent guidance quality for sales teams.
+
+4. **Add route-level rate limits and abuse controls**
+  Business impact: Better cost control and stronger protection on auth and AI endpoints.
+
+5. **Expand automated testing (unit, integration, end-to-end)**
+  Business impact: Faster, safer releases with lower regression risk.
+
+6. **Improve observability (structured logs, tracing, alerting)**
+  Business impact: Faster incident detection and shorter recovery time in production.
 
 ---
 
@@ -197,7 +248,7 @@ Create a `.env` file in the project root:
 ```env
 DATABASE_URL="your-postgresql-connection-string"
 JWT_SECRET="a-random-secret-at-least-32-characters-long"
-OPENAI_API_KEY="sk-..."
+GROQ_API_KEY="your-groq-api-key"
 
 # Required for Supabase integration
 NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
@@ -209,7 +260,7 @@ SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-key"
 
 - **DATABASE_URL** — any PostgreSQL-compatible connection string (Supabase, Neon, Prisma Postgres, Railway, etc.)
 - **JWT_SECRET** — used to sign and verify session tokens; generate with `openssl rand -base64 32`
-- **OPENAI_API_KEY** — an OpenAI key with access to GPT-4o-mini
+- **GROQ_API_KEY** — API key for Groq's OpenAI-compatible endpoint (used by AI scoring and summary routes)
 - **NEXT_PUBLIC_SUPABASE_URL** and **NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY** — required for Supabase client integration
 - **SUPABASE_SERVICE_ROLE_KEY** — required for server-side Supabase operations in this project
 
@@ -255,7 +306,7 @@ Open [http://localhost:3000](http://localhost:3000) and register a manager accou
 
 ```
 User
-  id, email, name, passwordHash, role (ADMIN | MANAGER)
+  id, email, name, password, role (ADMIN | MANAGER)
 
 Lead
   id, name, email, phone, company
@@ -281,7 +332,7 @@ Interaction
 3. Add the required environment variables in **Project Settings → Environment Variables**:
   - DATABASE_URL
   - JWT_SECRET
-  - OPENAI_API_KEY
+  - GROQ_API_KEY
   - NEXT_PUBLIC_SUPABASE_URL
   - NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY
   - SUPABASE_SERVICE_ROLE_KEY
